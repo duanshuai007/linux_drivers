@@ -121,6 +121,8 @@ static int s3c2440_led_open(struct inode * inode, struct file * filp)
     struct clk * clk_p;
     unsigned long pclk;
     unsigned long tcnt;
+    if (s3c2440_led.openflag == 1)
+        return -EINVAL;
     /*这句话用于间接对s3c2440_led控制，但是下面用到是直接控制，所以没啥用*/
     filp->private_data = &s3c2440_led;
     /*修改打开标志位*/
@@ -198,6 +200,9 @@ static int s3c2440_led_release(struct inode * inode, struct file * filp)
     int tmp;
     printk("led release\r\n");
 
+    if (!dev->openflag)
+        return -EINVAL;
+
     disable_irq(leds.timer);
     free_irq(leds.timer, (void *)dev);
 
@@ -227,7 +232,7 @@ static void s3c2440_led_freq(struct s3c2440_led * dev, unsigned long arg)
     printk("led freq\r\n");
     int tmp;
 
-    if(!s3c2440_led.timer_openflag && (arg > 0))
+    if(!dev->timer_openflag && (arg > 0))
     {   //第一次打开定时器
         //tmp = *mTCON;
         //tmp &= ~(0x0000001f);

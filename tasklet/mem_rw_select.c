@@ -552,7 +552,6 @@ static int __init hello_init(void)
 {
     int err;
     struct timer_data *timerdata;
-    struct timer_data *tasklet_data;
 	
     printk("module init\r\n");
 
@@ -640,17 +639,7 @@ static int __init hello_init(void)
 	device->read_timeout_done = 0;
 	mod_timer(&device->read_timer, jiffies + timeout_value * HZ);
 
-    tasklet_data = kmalloc(sizeof(struct timer_data), GFP_KERNEL);
-    if (tasklet_data == NULL) {
-        err = -ENOMEM;
-        goto err_timer;
-    }
-
-    tasklet_data->dev = device;
-    tasklet_data->paramter = 2;
-    //tasklet_init(&device->tasklet, tasklet_handler, (unsigned long)tasklet_data);
-
-    printk("success\r\n");
+	printk("success\r\n");
     return err;
 
 err_timer:

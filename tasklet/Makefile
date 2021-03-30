@@ -10,3 +10,11 @@ modules:
 	gcc test_select.c -o select
 clean:
 	@rm -rf *.o *.ko *.mod.c *.order *.symvers read write select a.out
+
+insmod:
+	sudo insmod tasklet.ko
+rmmod:
+	sudo rmmod tasklet
+reinsmod:
+	sudo rmmod tasklet
+	sudo insmod tasklet.ko

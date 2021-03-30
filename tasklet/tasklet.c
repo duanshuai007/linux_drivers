@@ -47,7 +47,7 @@ struct test_device {
     struct semaphore sem;
 
     struct timer_list timer;
-    struct tasklet_struct tasklet;
+    //struct tasklet_struct tasklet;
 
     char *buffer;
     ssize_t buffer_size;
@@ -59,8 +59,6 @@ struct test_device {
 
     dev_t dev_no;
     int major;
-    
-    char *device_name;
 };
 
 struct test_device *device = NULL;
@@ -87,7 +85,6 @@ int test_open(struct inode *inode, struct file *filp)
     //printk("device:buffer_size=%dx\r\n", dev->buffer_size);
     //printk("device:dev_no=%08x\r\n", dev->dev_no);
     //printk("device:major=%d\r\n", dev->major);
-    //printk("device:name=%s\r\n", dev->device_name);
 
     return 0;
 }
@@ -173,19 +170,15 @@ ssize_t test_read(struct file *filp, char __user *buff, size_t count, loff_t *of
 {
     struct test_device *dev = filp->private_data;
     ssize_t ret = -ENOMEM;
-    //struct cdev *dev = filp->private_data;
-    //if (*offset > sizeof(kernel_buff)) {
-    if (*offset > dev->buffer_size) {
+
+    if (*offset > dev->write_pos) {
+		ret = -EINVAL;
         goto out;
     }
     
-    //if (count + *offset > sizeof(kernel_buff)) {
-    if (count + *offset > dev->buffer_size) {
-        //count = sizeof(kernel_buff) - *offset;
-        count = dev->buffer_size - *offset;
+    if (count + *offset > dev->write_pos) {
+        count = dev->write_pos - *offset;
     }
-
-    printk("rpos:%ld, wpos:%ld, *offset=%lld\r\n", dev->read_pos, dev->write_pos, *offset);
 
     if (dev->write_pos == dev->read_pos) {
         if (filp->f_flags & O_NONBLOCK) 
@@ -194,8 +187,12 @@ ssize_t test_read(struct file *filp, char __user *buff, size_t count, loff_t *of
         //如果设备已经没有可读的消息，则进入等待，第二个参数必须为真才能从等待中唤醒
         if (wait_event_interruptible(dev->read_queue, dev->write_pos != dev->read_pos))
             return -ERESTARTSYS;
+		if (count + *offset > dev->write_pos) {
+			count = dev->write_pos - *offset;
+		}
     }
 
+    printk("%s[%ld]:rpos:%ld, wpos:%ld, *offset=%lld, count=%ld\r\n", __func__, __LINE__, dev->read_pos, dev->write_pos, *offset, count);
     if (copy_to_user(buff, dev->buffer + *offset, count)) {
         ret = -EFAULT;
         printk("copy_to_user error\r\n");
@@ -204,7 +201,7 @@ ssize_t test_read(struct file *filp, char __user *buff, size_t count, loff_t *of
 
     *offset += count;
     ret = count;
-    dev->read_pos += count;
+    dev->read_pos = *offset;
 
 out:
     return ret;
@@ -218,22 +215,19 @@ ssize_t test_write(struct file *filp, const char __user *buff, size_t count, lof
     //返回0则表示申请成功
     if (down_interruptible(&dev->sem)) {
         //ret = -ERESTART;
-        ret = -ENAVAIL;
+        ret = -EBUSY;
         goto out_sem;
     }
 
-    //if ( *offset >= sizeof(kernel_buff))
     if ( *offset >= dev->buffer_size)
         goto out;
 
-    //if ( *offset + count > sizeof(kernel_buff)) {
     if ( *offset + count > dev->buffer_size) {
-        //count = sizeof(kernel_buff) - *offset;
-        count = dev->buffer_size - *offset;
+        //count = dev->buffer_size - *offset;
+		goto out;
     }
 
-    //printk("write count:%d, offset=%d\r\n", (int)count, (int)(*offset));
-
+    //printk("%s[%ld]:rpos:%ld, wpos:%ld, *offset=%lld, count=%ld\r\n", __func__, __LINE__, dev->read_pos, dev->write_pos, *offset, count);
     if(copy_from_user(dev->buffer + *offset, buff, count)) {
         ret = -EFAULT;
         goto out;
@@ -243,9 +237,8 @@ ssize_t test_write(struct file *filp, const char __user *buff, size_t count, lof
     ret = count;
     if (*offset > dev->write_pos)
         dev->write_pos += count;
-    printk("rpos:%ld, wpos:%ld, *offset=%lld\r\n", dev->read_pos, dev->write_pos, *offset);
+    //printk("rpos:%ld, wpos:%ld, *offset=%lld\r\n", dev->read_pos, dev->write_pos, *offset);
     wake_up_interruptible(&dev->read_queue);
-
 out:
     up(&dev->sem);
 out_sem:
@@ -332,9 +325,9 @@ void timer_handler(unsigned long arg)
     printk("timer_handler\r\n");
     dev->timer.expires += 1000;
     add_timer(&dev->timer);
-    tasklet_schedule(&dev->tasklet); 
+    //tasklet_schedule(&dev->tasklet); 
 }
-
+#if 0
 void tasklet_handler(unsigned long arg)
 {
     //struct timer_data *dat  = (struct timer_data *)arg;
@@ -342,6 +335,7 @@ void tasklet_handler(unsigned long arg)
 
     printk("tasklet_handler\r\n");
 }
+#endif
 
 struct class *myclass = NULL;
 
@@ -352,7 +346,6 @@ static int __init hello_init(void)
     struct timer_data *tasklet_data;
 	
     printk("module init\r\n");
-
     device = kmalloc(sizeof(struct test_device), GFP_KERNEL);
     if (device == NULL) {
         err = -ENOMEM;
@@ -368,27 +361,16 @@ static int __init hello_init(void)
     }
     memset(device->buffer, 0, device->buffer_size);
 
-    device->device_name = kmalloc(strlen(DEVICE_NAME), GFP_KERNEL);
-    if (device->device_name == NULL) {
-        err = -ENOMEM;
-        goto out3;
-    }
-
     device->major = MAJOR_MODE;
-    strcpy(device->device_name, DEVICE_NAME);
-
     sema_init(&device->sem, 1);
-
     init_waitqueue_head(&device->read_queue);
-
     init_timer(&device->timer);
-
 
     //注册设备编号
     if (device->major == 0) {
         //动态申请
         //printk("动态申请设备号\r\n");
-        err = alloc_chrdev_region(&device->dev_no, 0, 1, device->device_name);
+        err = alloc_chrdev_region(&device->dev_no, 0, 1, DEVICE_NAME);
         device->major = MAJOR(device->dev_no);
         //request_chrdev_region(devno, 1);
     } else {
@@ -402,22 +384,12 @@ static int __init hello_init(void)
     
     if (err < 0) {
         printk("can't get major %d\r\n", device->major);
-        //    return err;
         goto out3;
     }
 
     myclass = class_create(THIS_MODULE, "aTest" );
 
     //分配cdev空间,因为我在结构体中使用的静态cdev所以不需要动态申请内存
-#if 0
-    device->cdev = cdev_alloc();
-    if (device->cdev == NULL) {
-        printk("cdev_alloc failed\r\n");
-        err = -ENOMEM;
-        goto out_cdev_alloc;
-    }
-    printk("申请cdev空间\r\n");
-#endif
 	cdev_init(&device->cdev, &test_fops);
     err = cdev_add(&device->cdev, device->dev_no, 1);
     if (err) {
@@ -443,6 +415,7 @@ static int __init hello_init(void)
 
     add_timer(&device->timer);
 
+#if 0
     tasklet_data = kmalloc(sizeof(struct timer_data), GFP_KERNEL);
     if (tasklet_data == NULL) {
         err = -ENOMEM;
@@ -452,18 +425,15 @@ static int __init hello_init(void)
     tasklet_data->dev = device;
     tasklet_data->paramter = 2;
     tasklet_init(&device->tasklet, tasklet_handler, (unsigned long)tasklet_data);
-
+#endif
     //printk("success\r\n");
     return err;
 
 err_timer:
     kfree(timerdata);
 out_cdev_add:
-//    kfree(&device->cdev);
-//out_cdev_alloc:
     unregister_chrdev_region(device->dev_no,  1);
 out3:
-    kfree(device->device_name);
 out2:
     kfree(device->buffer);
 out1:
@@ -486,7 +456,6 @@ static void __exit hello_exit(void)
 	unregister_chrdev_region(device->dev_no,  1);
     //kfree(&device->cdev);
 
-    kfree(device->device_name);
     kfree(device->buffer);
     kfree(device);
 }

@@ -42,6 +42,8 @@ int main()
     volatile int pos;
     int ret;
 
+	struct timeval tv;
+
     fd = open("/dev/aTest", O_RDWR);
     if (fd < 0) {
         perror("open");
@@ -54,12 +56,15 @@ int main()
     fd_set read_fds;
 
 #if 1 
-    for(k=0; k < 25; k++) {
-    //    pos = k * strlen(MESSAGE);
+	while(1) {
         FD_ZERO(&read_fds);
         FD_SET(fd, &read_fds);
 
-        ret = select(fd+1, &read_fds, NULL, NULL, NULL);
+		tv.tv_sec = 0;
+		tv.tv_usec = 200*1000;
+
+        //ret = select(fd+1, &read_fds, NULL, NULL, NULL);
+        ret = select(fd+1, &read_fds, NULL, NULL, &tv);
         if (ret < 0) {
             perror("select");
             continue;
@@ -69,12 +74,12 @@ int main()
             printf("has select\r\n");
             if (FD_ISSET(fd, &read_fds)) {
                 memset(buff, 0, sizeof(buff));
-                len = read(fd, buff, 13);
+                len = read(fd, buff, sizeof(buff));
                 if(len < 0) {
                     perror("read");
                 } else {
                     //printf("read len=%d\r\n", len);
-                    printf("* %s\r\n", buff);
+                    printf("read: %s len=%d\r\n", buff, len);
                 }        
             }
         }

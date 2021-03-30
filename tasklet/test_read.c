@@ -57,7 +57,8 @@ int main()
     //ioctl(fd,  1, NULL);
 
 #if 1 
-    for(k=0; k < 25; k++) {
+    //for(k=0; k < 25; k++) {
+	while(1) {
     //    pos = k * strlen(MESSAGE);
 
     //    printf("pos = %d\r\n", pos);
@@ -77,7 +78,7 @@ int main()
             perror("read");
         } else {
             //printf("read len=%d\r\n", len);
-            printf("* %s\r\n", buff);
+            printf("* %s len=%d\r\n", buff, len);
         }
     }
 #endif

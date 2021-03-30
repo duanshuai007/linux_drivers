@@ -67,7 +67,7 @@ int main(int argc, char *argv[])
 #if 1
    int i; 
     for(i=pos;i<(pos + count);i++) {
-        lseek(fd, SEEK_SET, i * strlen(MESSAGE));
+        //lseek(fd, SEEK_SET, i * strlen(MESSAGE));
         len = write(fd, MESSAGE, strlen(MESSAGE));
         if (len < 0) {
             perror("write");

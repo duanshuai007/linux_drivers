@@ -125,13 +125,6 @@ static int spilcd_on(void)
 	return fd;
 }
 
-/*
- *		输入参数为1维list
- *		LCD屏幕每行有160个像素点
- *		每个像素点用4bit来表示
- *		每行的寻址范围是0-162，其中超出160的点位不显示在屏幕上，但是在内存中必须要有占位
- */
-
 /* epoll example */
 static int make_socket_non_blocking(int socket_fd)
 {   
@@ -163,8 +156,37 @@ static int socket_create_bind_local(int port)
 		exit(1);
 	}
 
-	if (setsockopt(socket_fd,SOL_SOCKET,SO_REUSEADDR,&opt,sizeof(int)) == -1) {
-		perror("Setsockopt");
+	/*
+		1)SOL_SOCKET:通用套接字选项.
+		2)IPPROTO_IP:IP选项.
+		3)IPPROTO_TCP:TCP选项.　
+		
+		SO_BROADCAST　　　　　　允许发送广播数据　　　　　　　　　　　　int
+		SO_DEBUG　　　　　　　　允许调试　　　　　　　　　　　　　　　　int
+		SO_DONTROUTE　　　　　　不查找路由　　　　　　　　　　　　　　　int
+		SO_ERROR　　　　　　　　获得套接字错误　　　　　　　　　　　　　int
+		SO_KEEPALIVE　　　　　　保持连接　　　　　　　　　　　　　　　　int
+		SO_LINGER　　　　　　　 延迟关闭连接　　　　　　　　　　　　　　struct linger
+		SO_OOBINLINE　　　　　　带外数据放入正常数据流　　　　　　　　　int
+		SO_RCVBUF　　　　　　　 接收缓冲区大小　　　　　　　　　　　　　int
+		SO_SNDBUF　　　　　　　 发送缓冲区大小　　　　　　　　　　　　　int
+		SO_RCVLOWAT　　　　　　 接收缓冲区下限　　　　　　　　　　　　　int
+		SO_SNDLOWAT　　　　　　 发送缓冲区下限　　　　　　　　　　　　　int
+		SO_RCVTIMEO　　　　　　 接收超时　　　　　　　　　　　　　　　　struct timeval
+		SO_SNDTIMEO　　　　　　 发送超时　　　　　　　　　　　　　　　　struct timeval
+		SO_REUSERADDR　　　　　 允许重用本地地址和端口　　　　　　　　　int
+		SO_TYPE　　　　　　　　 获得套接字类型　　　　　　　　　　　　　int
+		SO_BSDCOMPAT　　　　　　与BSD系统兼容　　　　　　　　　　　　　 int
+		
+		成功执行时，返回0。失败返回-1，errno被设为以下的某个值  
+		EBADF：sock不是有效的文件描述词
+		EFAULT：optval指向的内存并非有效的进程空间
+		EINVAL：在调用setsockopt()时，optlen无效
+		ENOPROTOOPT：指定的协议层不能识别选项
+		ENOTSOCK：sock描述的不是套接字
+	*/
+	if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(int)) == -1) {
+		perror("setsockopt");
 		exit(1);
 	}
 
@@ -181,7 +203,7 @@ static int socket_create_bind_local(int port)
 	return 0;
 }
 
-static void accept_and_add_new()
+static void accept_and_add_new(void)
 {   
 	struct epoll_event event;
 	struct sockaddr in_addr;
@@ -256,6 +278,7 @@ int main(int argc, char *argv[])
 		exit(1);
 	}
 
+	/*如果flags为0,epoll_create1()和删除了过时size参数的epoll_create()相同*/
 	epoll_fd = epoll_create1(0);
 	if (epoll_fd == -1) {
 		perror("epoll_create1");
@@ -290,7 +313,8 @@ int main(int argc, char *argv[])
 			}
 		}
 	}
-
+	
+err:
 	free(events);
 	close(socket_fd);
 	close(device_fd);

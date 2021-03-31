@@ -52,6 +52,7 @@ typedef struct device_t
     wait_queue_head_t queue;
     int interrupt_flag;
     int openflag;
+	dev_t devno;
 	//timer
     int timer;
     char timer_name[8];
@@ -287,20 +288,8 @@ static int platform_test_probe(struct platform_device * dev)
     int i, ret;
     struct resource *dev_resource;
     struct platform_device * pdev = dev;
-    dev_t devno;
 
     printk("match ok!");
-    //设备号申请
-
-    if(dev_major > 0) {
-        devno = MKDEV(dev_major, 0);
-        ret = register_chrdev_region(devno, 1, DRIVER_NAME);
-    } else {
-        ret = alloc_chrdev_region(&devno, 0, 1, DRIVER_NAME);
-        dev_major = MAJOR(devno);
-    }
-    if(ret < 0)
-        return ret;
 
 	device = kmalloc(sizeof(device_t), GFP_KERNEL);
 	if (device == NULL) {
@@ -309,13 +298,25 @@ static int platform_test_probe(struct platform_device * dev)
 		goto err_register;
 	}
 	memset(device, 0, sizeof(device_t));
+
+    //设备号申请
+	if(dev_major > 0) {
+        device->devno = MKDEV(dev_major, 0);
+        ret = register_chrdev_region(device->devno, 1, DRIVER_NAME);
+    } else {
+        ret = alloc_chrdev_region(&device->devno, 0, 1, DRIVER_NAME);
+        dev_major = MAJOR(device->devno);
+    }
+    if(ret < 0)
+        return ret;
+
     //完成设备类创建，实现设备文件自动创建
     device->class = class_create(THIS_MODULE, DRIVER_NAME);
     printk("create class:%08x\r\n", device->class);
     //2、完成字符设备到加载
     //device->cdev = cdev_alloc();
     cdev_init(&device->cdev, &s3c2440_led_ops);
-    ret = cdev_add(&device->cdev, devno, 1);
+    ret = cdev_add(&device->cdev, device->devno, 1);
     if(ret) {
         printk("%s[%d]:add device error\r\n", __func__, __LINE__);
 		ret = -EINVAL;
@@ -331,7 +332,7 @@ static int platform_test_probe(struct platform_device * dev)
     spin_unlock(&device->lock);
     //初始化等待队列
     //设备创建，是想问件自动创建
-    device_create(device->class, NULL, devno, NULL, DRIVER_NAME);
+    device_create(device->class, NULL, device->devno, NULL, DRIVER_NAME);
 
 	sema_init(&device->led_sem, 1);
 
@@ -369,7 +370,7 @@ static int platform_test_probe(struct platform_device * dev)
     return ret;
 
 err_get_resource:
-    device_destroy(device->class, MKDEV(dev_major, 0));
+    device_destroy(device->class, device->devno);
 	for (i = 0; i < NUM_RESOURCE; i++) {
 		if (device->led[i].enable == true) {
 			del_timer_sync(&device->led[i].softtimer);
@@ -379,7 +380,7 @@ err_cdev_add:
 	cdev_del(&device->cdev);
 	kfree(device);
 err_register:
-	unregister_chrdev_region(MKDEV(dev_major, 0), 1);
+	unregister_chrdev_region(device->devno, 1);
 	return ret;
 }
 
@@ -390,7 +391,7 @@ static int platform_test_remove(struct platform_device * pdev)
     printk("platform_driver_remove->class:%08x\r\n", device->class);
     printk("platform_driver_remove->cdev:%08x\r\n", &device->cdev);
 
-    device_destroy(device->class, MKDEV(dev_major, 0));
+    device_destroy(device->class, device->devno);
 	for (i = 0; i < NUM_RESOURCE; i++) {
 		if (device->led[i].enable == true) {
 			del_timer_sync(&device->led[i].softtimer);
@@ -399,7 +400,7 @@ static int platform_test_remove(struct platform_device * pdev)
     cdev_del(&device->cdev);
     class_destroy(device->class);
 
-    unregister_chrdev_region(MKDEV(dev_major, 0), 1);
+    unregister_chrdev_region(device->devno, 1);
 
 	kfree(device);
     printk("platform_driver_remove---------------- end\r\n");

@@ -27,8 +27,6 @@ int __init foo_probe(void)
         pr_err("could not register foo pin driver\n");
 }
 
-group
-
 #include <linux/pinctrl/pinctrl.h>
 struct foo_group {
     const char *name;

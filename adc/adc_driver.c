@@ -80,12 +80,18 @@ static int s3c2440_adc_open(struct inode * inode, struct file * filp)
 
     spin_lock(&(s3c2440_adc.lock));
     {
+		if (s3c2440_adc.openflag == 1) {
+			printk("already open !\r\n");
+			spin_unlock(&(s3c2440_adc.lock));
+			return 0;
+		}
+
         s3c2440_adc.openflag = 1;
         //使能ADC时钟
         adc_clk = clk_get(NULL, "adc");
-        if(!adc_clk)
-        {
+        if(!adc_clk) {
             printk(KERN_ERR "failed to find adc clock source\n");
+			spin_unlock(&(s3c2440_adc.lock));
             return -ENOENT;
         }
         clk_enable(adc_clk);
@@ -136,14 +142,17 @@ static int s3c2440_adc_open(struct inode * inode, struct file * filp)
 static int s3c2440_adc_release(struct inode * inode, struct file * filp)
 {
     printk("kernel:adc release\r\n");
+    spin_lock(&(s3c2440_adc.lock));
+	if (s3c2440_adc.openflag == 0) {
+		printk("already close\r\n");
+		spin_unlock(&(s3c2440_adc.lock));
+		return 0;
+	}
 
+	s3c2440_adc.openflag = 0;
+    spin_unlock(&(s3c2440_adc.lock));
     disable_irq(adcs.adc_irqs);
     free_irq(adcs.adc_irqs, (void *)&s3c2440_adc);
-
-    spin_lock(&(s3c2440_adc.lock));
-    s3c2440_adc.openflag = 0;
-    spin_unlock(&(s3c2440_adc.lock));
-
     return 0;
 }
 
@@ -260,28 +269,34 @@ static int s3c2440_adc_probe(struct platform_device * dev)
     //1、设备号到申请
     dev_t devno;
 
-    if(dev_major > 0)
-    {
+    if(dev_major > 0) {
         devno = MKDEV(dev_major, 0);
         ret = register_chrdev_region(devno, 1, "s3c2440_adc");
-    }else{
+    } else {
         ret = alloc_chrdev_region(&devno, 0, 1, "s3c2440_adc");
         dev_major = MAJOR(devno);
     }
     if(ret < 0)
-    {
         return ret;
-    }
+
     //完成设备类创建
     s3c2440_adc.myclass = class_create( THIS_MODULE, "s3c2440_adc" );
+	if (s3c2440_adc.myclass == NULL) {
+		ret = -ENOMEM;
+		goto err_class;
+	}
     //2、完成字符设备的加载
     s3c2440_adc.mycdev = cdev_alloc();
+	if (s3c2440_adc.mycdev == NULL) {
+		ret = -ENOMEM;
+		goto err_cdev_alloc;
+	}
     cdev_init(s3c2440_adc.mycdev, &s3c2440_adc_ops);
     ret = cdev_add(s3c2440_adc.mycdev, devno, 1);
-    if(ret)
-    {
+    if(ret) {
         printk("kernel:cdev_add error\r\n");
-        return ret;
+		ret = -EINVAL;
+		goto err_cdev;
     }
     printk("kernel:s3c2440_adc cdev:%d\r\n", s3c2440_adc.mycdev);
 
@@ -293,10 +308,10 @@ static int s3c2440_adc_probe(struct platform_device * dev)
     device_create(s3c2440_adc.myclass, NULL, devno, NULL, "s3c2440_adc");
     //获取device资源
     adc_resource = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-    if(adc_resource == NULL)
-    {
+    if(adc_resource == NULL) {
         printk("kernel:platform get resource MEM failed\r\n");
-        return -ENOENT;
+        ret = -ENOENT;
+		goto err_resource;
     }
     adcs.padcs = adc_resource->start;
     adcs.size = adc_resource->end - adc_resource->start;
@@ -309,13 +324,24 @@ static int s3c2440_adc_probe(struct platform_device * dev)
     if(adc_resource == NULL)
     {
         printk("kernel:platform get resource IRQ failed\r\n");
-        return -ENOENT;
+        ret = -ENOENT;
+		goto err_resource;
     }
     adcs.adc_irqs = adc_resource->start;
     adcs.irq_names = adc_resource->name;
     printk("kernel:adc_irqs:%d, irq_name:%s\r\n",
             adcs.adc_irqs, adcs.irq_names);
     return 0;
+
+err_resource:
+    device_destroy(s3c2440_adc.myclass, MKDEV(dev_major, 0));
+err_cdev:
+	cdev_del(s3c2440_adc.mycdev);
+err_cdev_alloc:
+	class_destroy(s3c2440_adc.myclass);
+err_class:
+    unregister_chrdev_region(MKDEV(dev_major, 0), 1);
+	return ret;
 }
 
 static int s3c2440_adc_remove(struct platform_device * pdev)
@@ -340,8 +366,7 @@ static int __init platform_driver_init(void)
 {
     int ret;
     ret = platform_driver_register(&s3c2440_adc_driver);
-    if(ret)
-    {
+    if(ret) {
         platform_driver_unregister(&s3c2440_adc_driver);
         return ret;
     }

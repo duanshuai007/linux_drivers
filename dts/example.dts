@@ -1,0 +1,184 @@
+
+//第一行表示这个dts文件的版本
+/dts-v1/;
+
+/ {
+	compatible = "acme,coyotes-revenge";
+	//root节点的address-cells和size-cells作用到gpio,serial,spi,intc上，表示address和length字段长度分别是1.
+	#address-cells = <1>;
+	#size-cells = <1>;
+	/**
+	 设备结点透过它来指定它所依附的中断控制器的phandle，当结点没有指定interrupt-parent时，
+	 则从父级结点继承。对于本例而言，root结点指定了interrupt-parent = <&intc>;其对应于
+	 intc: interrupt-controller@10140000，而root结点的子结点并未指定interrupt-parent，因
+	 此它们都继承了intc，即位于0x10140000的中断控制器。
+	 **/
+	interrupt-parent = <&intc>;
+
+	chosen {
+		bootargs = "root=/dev/nfs ip=dhcp rw";
+	};  
+
+	//为节点声明别名
+	aliases {
+		spi = &spi_0;
+	};
+
+	//该节点在每个设备树中必然存在一个,假设我们的设备具有两块内存
+	//内存1:0xe0000000 lenght:0x08000000
+	//内存2:0xf0000000 lenght:0x09000000
+	memory {
+		device_type = "memory";
+		reg = <	0xE0000000 0x08000000
+				0xf0000000 0x09000000>;
+	};
+	//或者也可以这么写
+	memory@0xe0000000 {
+		device_type = "memory";
+		reg = <0xe0000000 0x08000000>;
+	};
+	memory@0xf0000000 {
+		device_type = "memory";
+		reg = <0xf0000000 0x09000000>;
+	};
+
+	cpus {
+		//cpus节点中的address-cells和size-cells只对他的字节点起作用
+		//所以作用范围是cpu@0和cpu@1
+		#address-cells = <1>;
+		#size-cells = <0>;
+		cpu@0 {
+			compatible = "arm,cortex-a9";
+			//受cpus中的address-cells和size-cells影响，reg中只有一位，表示地址
+			reg = <0>;
+		};
+		cpu@1 {
+			compatible = "arm,cortex-a9";
+			reg = <1>;
+		};
+	};
+
+	serial@101f0000 {
+		compatible = "arm,pl011";
+		//root中的address-cell和size-cells作用到这里
+		//reg中的第一位表示address 第二位表示length
+		reg = <0x101f0000 0x1000 >;
+		interrupts = < 1 0 >;
+	};
+
+	serial@101f2000 {
+		compatible = "arm,pl011";
+		//root中的address-cell和size-cells作用到这里
+		//reg中的第一位表示address 第二位表示length
+		reg = <0x101f2000 0x1000 >;
+		interrupts = < 2 0 >;
+	};
+
+	gpio@101f3000 {
+		compatible = "arm,pl061";
+		//root中的address-cell和size-cells作用到这里
+		//reg中的第一位表示address 第二位表示length
+		//第三位表示address 第四位表示length
+		reg = <	0x101f3000 0x1000
+				0x101f4000 0x0010 >;
+
+		/*
+		   用到了中断的设备结点透过它指定中断号、触发方法等，具体这个属性含有多少个cell，
+		   由它依附的中断控制器结点的#interrupt-cells属性决定。而具体每个cell又是什么含义，
+		   一般由驱动的实现决定，而且也会在Device Tree的binding文档中说明。譬如，对于ARM GIC
+		   中断控制器而言，#interrupt-cells为3，它3个cell的具体含义
+		 01   The 1st cell is the interrupt type; 0 for SPI interrupts, 1 for PPI
+		 02   interrupts.
+		 03
+		 04   The 2nd cell contains the interrupt number for the interrupt type.
+		 05   SPI interrupts are in the range [0-987].  PPI interrupts are in the
+		 06   range [0-15].
+		 07
+		 08   The 3rd cell is the flags, encoded as follows:
+		 09         bits[3:0] trigger type and level flags.
+		 10                 1 = low-to-high edge triggered
+		 11                 2 = high-to-low edge triggered
+		 12                 4 = active high level-sensitive
+		 13                 8 = active low level-sensitive
+		 14         bits[15:8] PPI interrupt cpu mask.  Each bit corresponds to each of
+		 15         the 8 possible cpus attached to the GIC.  A bit set to '1' indicated
+		 16         the interrupt is wired to that CPU.  Only valid for PPI interrupts.
+			在本例子中intc里面定义了#interrupt-cells = <2> 所以节点中的interrupts 的属性
+			只有两个值.
+		 */
+		interrupts = < 3 0 >;
+	};
+
+	intc: interrupt-controller@10140000 {
+		compatible = "arm,pl190";
+		//root中的address-cell和size-cells作用到这里
+		//reg中的第一位表示address 第二位表示length
+		reg = <0x10140000 0x1000>;
+		//interrupt-controller – 这个属性为空，中断控制器应该加上此属性表明自己的身份
+		interrupt-controller;
+		//与#address-cells 和 #size-cells相似，它表明连接此中断控制器的设备的interrupts属性的cell大小
+		#interrupt-cells = <2>;
+	};
+
+	spi_0:spi@10115000 {
+		compatible = "arm,pl022";
+		//root中的address-cell和size-cells作用到这里
+		//reg中的第一位表示address 第二位表示length
+		reg = <0x10115000 0x1000 >;
+		interrupts = < 4 0 >;
+	};
+
+	external-bus {
+		//external-bus中的address-cells和size-cells只对他的子节点产生作用
+		//表示address占2位 lenght占1位
+		#address-cells = <2>;
+		#size-cells = <1>;
+
+		/*
+		 ranges属性定义了经过external-bus桥后的地址范围如何映射到CPU的memory区域.
+		 ranges是地址转换表，其中的每个项目是一个子地址、父地址以及在子地址空间的
+		 大小的映射。
+		 映射表中的子地址、父地址分别采用子地址空间的#address-cells和父地址空间
+		 的#address-cells大小。对于本例而言，子地址空间的#address-cells为2，父地址
+		 空间的#address-cells值为1.
+		 因此0 0 0x10100000 0x10000的前2个cell为external-bus后片选0上偏移0，
+		 第3个cell表示external-bus后片选0上偏移0的地址空间被映射到CPU的0x10100000位置，
+		 第4个cell表示映射的大小为0x10000。
+		 ranges的后面2个项目的含义可以类推。
+		 */
+		ranges = <	0 0  0x10100000   0x10000     // Chipselect 1, Ethernet
+					1 0  0x10160000   0x10000     // Chipselect 2, i2c controller
+					2 0  0x30000000   0x1000000 >; // Chipselect 3, NOR Flash
+
+		ethernet@0,0 {
+			compatible = "smc,smc91c111";
+			// 0 0 表示address 0x1000表示lenght
+			reg = <0 0 0x1000>;
+			interrupts = < 5 2 >;
+		};
+
+		i2c@1,0 {
+			compatible = "acme,a1234-i2c-bus";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			//这里对reg产生影响的是external-bus的address-cells和size-cells
+			//1 0 表示address 0x1000表示lenght
+			reg = <1 0 0x1000>;
+			interrupts = < 6 2 >;
+			rtc@58 {
+				compatible = "maxim,ds1338";
+				//对rtc@58节点产生作用的i2c@1,0节点中的address-cells和size-cells
+				//所以这里的address占1位，lenght占0位，即address为0x58
+				reg = <0x58>;
+				interrupts = < 7 3 >;
+			};
+		};
+
+		flash@2,0 {
+			compatible = "samsung,k8f1315ebm", "cfi-flash";
+			//reg受flash@2,0的父节点中的address-cells和size-cells影响
+			//2 0 表示address 0x40000000表示lenght
+			reg = <2 0 0x4000000>;
+		};
+	};
+};
